@@ -41,6 +41,47 @@ PLACEHOLDER_MP3_B64 = (
     "AAAAAABP/7UMQAAEwAAAAAAAE8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
     "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
 )
+# DIAGNOSTIC: paste into app.py before upload and redeploy
+import streamlit as st, io, traceback, os
+from supabase import create_client
+from storage3.exceptions import StorageApiError
+
+SUPABASE_URL = st.secrets.get("SUPABASE_URL")
+SUPABASE_KEY = st.secrets.get("SUPABASE_KEY")
+
+st.write("DEBUG: using SUPABASE_URL:", SUPABASE_URL)
+st.write("DEBUG: SUPABASE_KEY present?:", bool(SUPABASE_KEY))
+
+client = create_client(SUPABASE_URL, SUPABASE_KEY)
+
+# try listing buckets
+try:
+    buckets = client.storage.list_buckets()
+    st.write("Buckets:", [b.get("id") for b in buckets] if buckets else buckets)
+except Exception as e:
+    st.write("list_buckets() failed:", repr(e))
+
+# test upload small text file to check permissions
+try:
+    bucket = "cbse-resources"
+    test_path = "debug/test_upload.txt"
+    data = b"hello supabase debug"
+    file_obj = io.BytesIO(data); file_obj.name = "test_upload.txt"
+    st.write("Attempting small upload to", bucket, test_path)
+    resp = client.storage.from_(bucket).upload(path=test_path, file=file_obj, file_options={"content-type":"text/plain"})
+    st.write("Upload response:", resp)
+    st.write("Public URL:", client.storage.from_(bucket).get_public_url(test_path))
+except StorageApiError as e:
+    st.error("StorageApiError caught (detailed):")
+    st.write("e.args:", e.args)            # (message, error, statusCode)
+    st.write("repr(e):", repr(e))
+    st.write("Traceback:")
+    st.write(traceback.format_exc())
+except Exception as e:
+    st.error("Other exception during upload:")
+    st.write(repr(e))
+    st.write(traceback.format_exc())
+
 def upload_bytes_to_supabase(bucket: str, path: str, data: bytes, content_type="application/octet-stream"):
     try:
         # ensure bucket exists (ignore if already)
