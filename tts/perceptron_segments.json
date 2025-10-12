@@ -1,0 +1,4 @@
+[
+  {"segment_id":"perceptron_sec1","text":"Aaj hum seekhenge kya hai perceptron. Perceptron ek basic unit of a neural network... [pause 0.5s] For example, imagine weights and a threshold...", "approx_duration_seconds":45},
+  {"segment_id":"perceptron_sec2","text":"Perceptron learning rule updates weights when prediction is wrong... [pause 0.5s] Example: w := w + lr*(y - y_hat)*x", "approx_duration_seconds":40}
+]
