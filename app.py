@@ -42,22 +42,29 @@ PLACEHOLDER_MP3_B64 = (
     "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
 )
 def upload_bytes_to_supabase(bucket: str, path: str, data: bytes, content_type="application/octet-stream"):
-    # create bucket if not exists (supabase storage)
     try:
-        supabase.storage().create_bucket(bucket)
+        # ensure bucket exists (ignore if already)
+        supabase.storage.from_(bucket)
     except Exception:
-        pass
-    res = supabase.storage().from_(bucket).upload(path, data, {"content-type": content_type})
-    if res and res.get("KeyError") is None:
-        # generate public URL
-        public_url = supabase.storage().from_(bucket).get_public_url(path).get("publicURL")
-        return public_url
-    # fallback: try signed URL
+        try:
+            supabase.storage.create_bucket(bucket)
+        except Exception:
+            pass
+
+    # upload bytes correctly using new SDK signature
+    response = supabase.storage.from_(bucket).upload(path=path, file=data, file_options={"content-type": content_type})
+
+    # If upload is successful, get the public URL
     try:
-        resp = supabase.storage().from_(bucket).create_signed_url(path, 3600)
-        return resp.get("signedURL")
-    except Exception:
+        public_url = supabase.storage.from_(bucket).get_public_url(path)
+        if isinstance(public_url, dict):
+            return public_url.get("publicURL", None)
+        elif hasattr(public_url, "public_url"):
+            return public_url.public_url
+    except Exception as e:
+        st.warning(f"Could not get public URL: {e}")
         return None
+
 
 def extract_text_from_pdf_bytes(file_bytes: bytes) -> str:
     reader = PdfReader(BytesIO(file_bytes))
