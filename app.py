@@ -1,10 +1,12 @@
-# app.py
+# app.py (corrected)
 import streamlit as st
 from io import BytesIO
 from datetime import datetime
 import json
 import base64
 import os
+import tempfile
+import traceback
 
 # PDF text extraction
 from PyPDF2 import PdfReader
@@ -13,7 +15,6 @@ from PyPDF2 import PdfReader
 from supabase import create_client, Client
 
 # Optional OpenAI
-import os
 try:
     import openai
 except Exception:
@@ -24,6 +25,7 @@ st.set_page_config(page_title="CBSE NotesHub — Teacher Upload", layout="wide")
 # ---------- CONFIG from Streamlit secrets or ENV ----------
 SUPABASE_URL = st.secrets.get("SUPABASE_URL") or os.getenv("SUPABASE_URL")
 SUPABASE_KEY = st.secrets.get("SUPABASE_KEY") or os.getenv("SUPABASE_KEY")
+SUPABASE_SERVICE_ROLE = st.secrets.get("SUPABASE_SERVICE_ROLE") or os.getenv("SUPABASE_SERVICE_ROLE")
 OPENAI_KEY = st.secrets.get("OPENAI_API_KEY") or os.getenv("OPENAI_API_KEY")
 NOTEBOOKLM_KEY = st.secrets.get("NOTEBOOKLM_API_KEY") or os.getenv("NOTEBOOKLM_API_KEY")
 TTS_KEY = st.secrets.get("TTS_API_KEY") or os.getenv("TTS_API_KEY")
@@ -32,7 +34,16 @@ if not SUPABASE_URL or not SUPABASE_KEY:
     st.error("SUPABASE_URL and SUPABASE_KEY are required. Set them in Streamlit secrets.")
     st.stop()
 
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+# create two clients:
+#  - anon client (used for reads / DB insert attempts with anon key)
+#  - admin client (used for uploads if service_role key is present)
+supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+supabase_admin = None
+if SUPABASE_SERVICE_ROLE:
+    try:
+        supabase_admin = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE)
+    except Exception as e:
+        st.warning(f"Could not create admin client: {e}")
 
 # ---------- Helper utilities ----------
 PLACEHOLDER_MP3_B64 = (
@@ -41,70 +52,62 @@ PLACEHOLDER_MP3_B64 = (
     "AAAAAABP/7UMQAAEwAAAAAAAE8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
     "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
 )
-# DIAGNOSTIC: paste into app.py before upload and redeploy
-import streamlit as st, io, traceback, os
-from supabase import create_client
-from storage3.exceptions import StorageApiError
-
-SUPABASE_URL = st.secrets.get("SUPABASE_URL")
-SUPABASE_KEY = st.secrets.get("SUPABASE_KEY")
-
-st.write("DEBUG: using SUPABASE_URL:", SUPABASE_URL)
-st.write("DEBUG: SUPABASE_KEY present?:", bool(SUPABASE_KEY))
-
-client = create_client(SUPABASE_URL, SUPABASE_KEY)
-
-# try listing buckets
-try:
-    buckets = client.storage.list_buckets()
-    st.write("Buckets:", [b.get("id") for b in buckets] if buckets else buckets)
-except Exception as e:
-    st.write("list_buckets() failed:", repr(e))
-
-# test upload small text file to check permissions
-try:
-    bucket = "cbse-resources"
-    test_path = "debug/test_upload.txt"
-    data = b"hello supabase debug"
-    file_obj = io.BytesIO(data); file_obj.name = "test_upload.txt"
-    st.write("Attempting small upload to", bucket, test_path)
-    resp = client.storage.from_(bucket).upload(path=test_path, file=file_obj, file_options={"content-type":"text/plain"})
-    st.write("Upload response:", resp)
-    st.write("Public URL:", client.storage.from_(bucket).get_public_url(test_path))
-except StorageApiError as e:
-    st.error("StorageApiError caught (detailed):")
-    st.write("e.args:", e.args)            # (message, error, statusCode)
-    st.write("repr(e):", repr(e))
-    st.write("Traceback:")
-    st.write(traceback.format_exc())
-except Exception as e:
-    st.error("Other exception during upload:")
-    st.write(repr(e))
-    st.write(traceback.format_exc())
 
 def upload_bytes_to_supabase(bucket: str, path: str, data: bytes, content_type="application/octet-stream"):
+    """
+    Uploads bytes to Supabase Storage.
+    Uses service role client if available (recommended). Writes bytes to a temporary file
+    because storage3 expects a file path.
+    Returns public URL on success, or None.
+    """
+    client = supabase_admin if supabase_admin is not None else supabase
+
+    # ensure bucket exists (safe to ignore errors)
     try:
-        # ensure bucket exists (ignore if already)
-        supabase.storage.from_(bucket)
+        client.storage.create_bucket(bucket)
     except Exception:
-        try:
-            supabase.storage.create_bucket(bucket)
-        except Exception:
-            pass
+        pass
 
-    # upload bytes correctly using new SDK signature
-    response = supabase.storage.from_(bucket).upload(path=path, file=data, file_options={"content-type": content_type})
-
-    # If upload is successful, get the public URL
+    # write bytes to a temporary file and upload via path (storage3 expects path)
+    tmp_path = None
     try:
-        public_url = supabase.storage.from_(bucket).get_public_url(path)
-        if isinstance(public_url, dict):
-            return public_url.get("publicURL", None)
-        elif hasattr(public_url, "public_url"):
-            return public_url.public_url
-    except Exception as e:
-        st.warning(f"Could not get public URL: {e}")
-        return None
+        with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(path)[1] or "") as tmp:
+            tmp.write(data)
+            tmp.flush()
+            tmp_path = tmp.name
+
+        # upload using file path (required by installed storage3)
+        try:
+            resp = client.storage.from_(bucket).upload(path=path, file=tmp_path, file_options={"content-type": content_type})
+        except Exception as e:
+            # surface readable error in streamlit and logs
+            st.error("Upload failed; check logs for details.")
+            st.write("Upload exception:", repr(e))
+            # re-raise so full traceback lands in Streamlit logs (helpful for debugging)
+            raise
+
+        # get public url (handle different return shapes)
+        try:
+            public = client.storage.from_(bucket).get_public_url(path)
+            if isinstance(public, dict):
+                return public.get("publicURL") or public.get("public_url")
+            if hasattr(public, "get"):
+                return public.get("publicURL") or public.get("public_url")
+            if hasattr(public, "public_url"):
+                return public.public_url
+        except Exception as e:
+            st.warning(f"Could not fetch public URL: {e}")
+            return None
+
+    finally:
+        # cleanup temp file if created
+        if tmp_path and os.path.exists(tmp_path):
+            try:
+                os.unlink(tmp_path)
+            except Exception:
+                pass
+
+    return None
 
 
 def extract_text_from_pdf_bytes(file_bytes: bytes) -> str:
@@ -141,8 +144,23 @@ def generate_notes_via_openai(class_name, subject, chapter, topic, resource_text
 
 def generate_notes_fallback(class_name, subject, chapter, topic):
     # returns the sample perceptron JSON as fallback
-    with open("notes/n_perceptron.json", "r", encoding="utf-8") as f:
-        return json.load(f)
+    try:
+        with open("notes/n_perceptron.json", "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {
+            "id": "sample_fallback",
+            "class": class_name,
+            "subject": subject,
+            "chapter": chapter,
+            "topic": topic,
+            "title": f"{topic} (sample)",
+            "theory": [{"section_title": "Sample", "audio_segment_id": f"{topic}_s1", "text": "Sample fallback content."}],
+            "learning_objectives": [],
+            "examples": [],
+            "quick_revision": [],
+            "5_mcq": []
+        }
 
 def create_narration_segments(notes_json):
     # Use NotebookLM prompt template if you want real integration.
@@ -195,7 +213,13 @@ if submit:
         # store PDF in Supabase Storage
         now = datetime.utcnow().strftime("%Y%m%d%H%M%S")
         pdf_path = f"pdfs/{class_name}/{subject}/{topic}_{now}.pdf"
-        pdf_url = upload_bytes_to_supabase("cbse-resources", pdf_path, file_bytes, content_type="application/pdf")
+        try:
+            pdf_url = upload_bytes_to_supabase("cbse-resources", pdf_path, file_bytes, content_type="application/pdf")
+        except Exception as e:
+            st.error("PDF upload failed. See logs.")
+            st.write(traceback.format_exc())
+            pdf_url = None
+
         st.write("PDF uploaded:", pdf_url)
 
         # create topic metadata in Supabase DB table 'topics' (create table manually or allow failure)
@@ -228,7 +252,12 @@ if submit:
         # save notes JSON to Supabase and get URL
         notes_bytes = json.dumps(notes_json, ensure_ascii=False, indent=2).encode("utf-8")
         notes_path = f"notes/{class_name}/{subject}/{topic}_{now}.json"
-        notes_url = upload_bytes_to_supabase("cbse-resources", notes_path, notes_bytes, content_type="application/json")
+        try:
+            notes_url = upload_bytes_to_supabase("cbse-resources", notes_path, notes_bytes, content_type="application/json")
+        except Exception as e:
+            st.error("Notes upload failed. See logs.")
+            st.write(traceback.format_exc())
+            notes_url = None
         st.write("Notes JSON stored:", notes_url)
 
         # generate narration segments
@@ -240,14 +269,22 @@ if submit:
         for seg in segments:
             audio_bytes = synthesize_placeholder_audio(seg)
             seg_path = f"audio/{class_name}/{subject}/{seg['segment_id']}.mp3"
-            audio_url = upload_bytes_to_supabase("cbse-resources", seg_path, audio_bytes, content_type="audio/mpeg")
+            try:
+                audio_url = upload_bytes_to_supabase("cbse-resources", seg_path, audio_bytes, content_type="audio/mpeg")
+            except Exception:
+                st.write("Audio upload failed for segment:", seg.get("segment_id"))
+                audio_url = None
             audio_urls.append({"segment_id": seg["segment_id"], "url": audio_url})
         st.write("Audio files uploaded:", audio_urls)
 
         # Save mapping file (segments JSON)
         segments_bytes = json.dumps(segments, ensure_ascii=False, indent=2).encode("utf-8")
         segs_path = f"audio/{class_name}/{subject}/{topic}_{now}_segments.json"
-        segs_url = upload_bytes_to_supabase("cbse-resources", segs_path, segments_bytes, content_type="application/json")
+        try:
+            segs_url = upload_bytes_to_supabase("cbse-resources", segs_path, segments_bytes, content_type="application/json")
+        except Exception:
+            st.write("Segments JSON upload failed.")
+            segs_url = None
         st.write("Segments JSON stored:", segs_url)
 
         st.success("Resource created. You can share the PDF and notes URLs with students.")
