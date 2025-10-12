@@ -60,6 +60,8 @@ def upload_bytes_to_supabase(bucket: str, path: str, data: bytes, content_type="
     because storage3 expects a file path.
     Returns public URL on success, or None.
     """
+    st.write("DEBUG: Using admin client?" , bool(supabase_admin))
+
     client = supabase_admin if supabase_admin is not None else supabase
 
     # ensure bucket exists (safe to ignore errors)
