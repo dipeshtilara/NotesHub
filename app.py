@@ -88,18 +88,27 @@ def upload_bytes_to_supabase(bucket: str, path: str, data: bytes, content_type="
             # re-raise so full traceback lands in Streamlit logs (helpful for debugging)
             raise
 
-        # get public url (handle different return shapes)
+                # get public url (handle all possible return shapes)
         try:
             public = client.storage.from_(bucket).get_public_url(path)
+            st.write("DEBUG: get_public_url() returned:", public, type(public))
+
+            # --- handle all Supabase SDK return variants ---
             if isinstance(public, dict):
                 return public.get("publicURL") or public.get("public_url")
-            if hasattr(public, "get"):
-                return public.get("publicURL") or public.get("public_url")
             if hasattr(public, "public_url"):
-                return public.public_url
+                return getattr(public, "public_url")
+            if isinstance(public, str):
+                # some SDK builds return a plain string
+                return public
+
+            # fallback for any other type
+            return None
+
         except Exception as e:
             st.warning(f"Could not fetch public URL: {e}")
             return None
+
 
     finally:
         # cleanup temp file if created
