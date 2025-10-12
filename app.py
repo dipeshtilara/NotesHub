@@ -39,9 +39,16 @@ PLACEHOLDER_MP3_B64 = (
 
 # ---------- UTILITIES ----------
 def upload_bytes_to_supabase(bucket: str, path: str, data: bytes, content_type="application/octet-stream"):
-    """Upload bytes to Supabase and return a public URL."""
+    """
+    Replace previous upload helper.
+    - Writes bytes to a temporary file (storage3 expects a path).
+    - Avoids 409 Duplicate by creating a unique filename suffix (timestamp + short uuid).
+    - Returns the public URL on success, or None on failure.
+    """
+    import tempfile, uuid, os
     client = supabase_admin if supabase_admin else supabase
 
+    # ensure bucket exists (ignore errors)
     try:
         client.storage.create_bucket(bucket)
     except Exception:
@@ -49,15 +56,23 @@ def upload_bytes_to_supabase(bucket: str, path: str, data: bytes, content_type="
 
     tmp_path = None
     try:
-        with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(path)[1]) as tmp:
+        # create a unique path to avoid duplicate conflicts
+        base, ext = os.path.splitext(path)
+        ts = datetime.utcnow().strftime("%Y%m%d%H%M%S")
+        suffix = uuid.uuid4().hex[:6]
+        unique_path = f"{base}_{ts}_{suffix}{ext}"
+
+        # write to tempfile
+        with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as tmp:
             tmp.write(data)
             tmp.flush()
             tmp_path = tmp.name
 
-        client.storage.from_(bucket).upload(path=path, file=tmp_path, file_options={"content-type": content_type})
+        # upload using unique path
+        client.storage.from_(bucket).upload(path=unique_path, file=tmp_path, file_options={"content-type": content_type})
 
-        # handle all possible return formats
-        public = client.storage.from_(bucket).get_public_url(path)
+        # retrieve public URL (handle dict / attr / string)
+        public = client.storage.from_(bucket).get_public_url(unique_path)
         if isinstance(public, dict):
             return public.get("publicURL") or public.get("public_url")
         if hasattr(public, "public_url"):
@@ -67,16 +82,22 @@ def upload_bytes_to_supabase(bucket: str, path: str, data: bytes, content_type="
         return None
 
     except Exception as e:
-        st.error("⚠️ Upload failed.")
-        st.caption(f"Details: {repr(e)}")
+        # Surface minimal info to UI; full traceback remains in logs
+        st.error("⚠️ Upload failed. See logs for details.")
+        st.caption(f"{repr(e)}")
         return None
     finally:
         if tmp_path and os.path.exists(tmp_path):
-            os.unlink(tmp_path)
+            try:
+                os.unlink(tmp_path)
+            except Exception:
+                pass
+
 
 def extract_text_from_pdf_bytes(file_bytes: bytes) -> str:
     reader = PdfReader(BytesIO(file_bytes))
     return "\n\n".join([p.extract_text() or "" for p in reader.pages])
+
 
 def generate_notes_via_openai(class_name, subject, chapter, topic, text):
     if not openai or not OPENAI_KEY:
