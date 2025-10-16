@@ -95,10 +95,7 @@ PAGE_SIZE = 8
 try:
     qp = st.query_params or {}
 except Exception:
-    try:
-        qp = st.query_params() or {}
-    except Exception:
-        qp = {}
+    qp = {}
 
 page = int(qp.get("page", [1])[0]) if isinstance(qp.get("page"), list) else int(qp.get("page", 1))
 if page < 1:
@@ -131,13 +128,12 @@ with cols[0]:
     if st.button("← Prev") and page > 1:
         page -= 1
         st.set_query_params(page=page)
-        
-        st.rerun()
+        st.experimental_rerun()
 with cols[2]:
     if st.button("Next →") and page < total_pages:
         page += 1
         st.set_query_params(page=page)
-        st.rerun()
+        st.experimental_rerun()
 with cols[1]:
     st.write(f"Page {page} / {total_pages}")
 
@@ -292,7 +288,7 @@ if selected:
             del st.session_state['_selected']
         # reset query params (preserve page)
         st.set_query_params(page=page)
-        st.rerun()
+        st.experimental_rerun()
 
 # ---------- Footer ----------
 st.markdown("---")
