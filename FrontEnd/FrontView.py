@@ -96,7 +96,7 @@ try:
     qp = st.query_params or {}
 except Exception:
     try:
-        qp = st.experimental_get_query_params() or {}
+        qp = st.query_params() or {}
     except Exception:
         qp = {}
 
@@ -133,7 +133,7 @@ with cols[0]:
         try:
             st.set_query_params(page=page)
         except Exception:
-            st.experimental_set_query_params(page=page)
+            st.set_query_params(page=page)
         st.experimental_rerun()
 with cols[2]:
     if st.button("Next →") and page < total_pages:
@@ -141,7 +141,7 @@ with cols[2]:
         try:
             st.set_query_params(page=page)
         except Exception:
-            st.experimental_set_query_params(page=page)
+            st.set_query_params(page=page)
         st.experimental_rerun()
 with cols[1]:
     st.write(f"Page {page} / {total_pages}")
@@ -183,7 +183,7 @@ if page_items:
                     try:
                         st.set_query_params(topic=row.get("topic"), page=page)
                     except Exception:
-                        st.experimental_set_query_params(topic=row.get("topic"), page=page)
+                        st.set_query_params(topic=row.get("topic"), page=page)
                     st.experimental_rerun()
                 else:
                     st.warning("PDF not available for this topic.")
@@ -192,7 +192,7 @@ if page_items:
                 notes_url = row.get("notes_url") or infer_notes_url_from_pdf(pdf_url)
                 if notes_url:
                     try:
-                        st.experimental_set_query_params(notes=notes_url, page=page)
+                        st.set_query_params(notes=notes_url, page=page)
                     except Exception:
                         st.set_query_params(notes=notes_url, page=page)
                     st.experimental_rerun()
@@ -215,7 +215,7 @@ else:
     try:
         params = st.query_params or {}
     except Exception:
-        params = st.experimental_get_query_params() or {}
+        params = st.query_params() or {}
 
     if params.get("topic"):
         tname = params.get("topic")[0] if isinstance(params.get("topic"), list) else params.get("topic")
@@ -309,7 +309,7 @@ if selected:
         try:
             st.set_query_params(page=page)
         except Exception:
-            st.experimental_set_query_params(page=page)
+            st.set_query_params(page=page)
         st.experimental_rerun()
 
 # ---------- Footer ----------
