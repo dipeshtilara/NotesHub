@@ -1,17 +1,17 @@
 # student_frontend_streamlit.py
 # Improved student-facing Streamlit app for CBSE NotesHub (step 1)
-# - Replaces deprecated query param APIs (st.query_params / st.set_query_params)
+# - Uses modern query param API (st.query_params / st.set_query_params)
 # - Pagination
 # - Safer button keys
 # - Cleaner topic cards + expanders for notes & audio
-# - Robust URL inference and error handling
+# - Robust URL inference and public-url normalization for Supabase storage paths
 
 import streamlit as st
 from supabase import create_client
 import requests
 import json
 import os
-from typing import List, Dict
+from typing import List, Dict, Optional
 
 st.set_page_config(page_title="CBSE NotesHub — Student", layout="wide")
 
@@ -24,20 +24,100 @@ if not SUPABASE_URL or not SUPABASE_KEY:
     st.stop()
 
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+# change this if your bucket name differs
+DEFAULT_BUCKET = "cbse-resources"
 
 # ---------- Helpers ----------
 @st.cache_data(ttl=60)
 def list_topics() -> List[Dict]:
-    """Fetch topics from `topics` table. Returns list of rows or empty list on error."""
+    """Fetch topics from `topics` table. Returns list of normalized rows or empty list on error."""
     try:
         resp = supabase.table("topics").select("*").order("created_at", desc=True).execute()
         data = resp.data if hasattr(resp, "data") else resp
-        return data or []
-    except Exception:
+        rows = data or []
+    except Exception as e:
+        # surface minimal debug info
+        st.sidebar.error(f"Error fetching topics: {str(e)}")
         return []
 
+    normalized = []
+    for r in rows:
+        nr = dict(r)  # shallow copy so we can normalize
+        # normalize common URL/path fields to full public URLs if necessary
+        for field in ("pdf_url", "pdf", "pdf_path", "file_path"):
+            if not nr.get("pdf_url") and r.get(field):
+                candidate = r.get(field)
+                if candidate and isinstance(candidate, str):
+                    if candidate.startswith("http"):
+                        nr["pdf_url"] = candidate
+                    else:
+                        # try converting storage path -> public url (best-effort)
+                        try:
+                            public = supabase.storage.from_(DEFAULT_BUCKET).get_public_url(candidate)
+                            if isinstance(public, dict):
+                                pub_url = public.get("publicURL") or public.get("public_url")
+                            else:
+                                pub_url = public
+                            nr["pdf_url"] = pub_url or candidate
+                        except Exception:
+                            nr["pdf_url"] = candidate
+
+        # notes_url normalization
+        notes_candidate = r.get("notes_url") or r.get("notes_json") or r.get("notes_path")
+        if notes_candidate:
+            if isinstance(notes_candidate, str) and notes_candidate.startswith("http"):
+                nr["notes_url"] = notes_candidate
+            else:
+                try:
+                    public = supabase.storage.from_(DEFAULT_BUCKET).get_public_url(notes_candidate)
+                    if isinstance(public, dict):
+                        nr["notes_url"] = public.get("publicURL") or public.get("public_url") or notes_candidate
+                    else:
+                        nr["notes_url"] = public or notes_candidate
+                except Exception:
+                    nr["notes_url"] = notes_candidate
+        else:
+            nr["notes_url"] = None
+
+        # segments_url normalization
+        segs_candidate = r.get("segments_url") or r.get("segments_json") or r.get("audio_segments") or r.get("segments_path")
+        if segs_candidate:
+            if isinstance(segs_candidate, str) and segs_candidate.startswith("http"):
+                nr["segments_url"] = segs_candidate
+            else:
+                try:
+                    public = supabase.storage.from_(DEFAULT_BUCKET).get_public_url(segs_candidate)
+                    if isinstance(public, dict):
+                        nr["segments_url"] = public.get("publicURL") or public.get("public_url") or segs_candidate
+                    else:
+                        nr["segments_url"] = public or segs_candidate
+                except Exception:
+                    nr["segments_url"] = segs_candidate
+        else:
+            nr["segments_url"] = None
+
+        # thumbnail normalization (optional)
+        thumb = r.get("thumbnail_url") or r.get("thumbnail_path")
+        if thumb:
+            if isinstance(thumb, str) and thumb.startswith("http"):
+                nr["thumbnail_url"] = thumb
+            else:
+                try:
+                    public = supabase.storage.from_(DEFAULT_BUCKET).get_public_url(thumb)
+                    if isinstance(public, dict):
+                        nr["thumbnail_url"] = public.get("publicURL") or public.get("public_url") or thumb
+                    else:
+                        nr["thumbnail_url"] = public or thumb
+                except Exception:
+                    nr["thumbnail_url"] = thumb
+        else:
+            nr["thumbnail_url"] = None
+
+        normalized.append(nr)
+    return normalized
+
 @st.cache_data(ttl=60)
-def fetch_json_from_url(url: str):
+def fetch_json_from_url(url: str) -> Optional[Dict]:
     try:
         r = requests.get(url, timeout=8)
         if r.status_code == 200:
@@ -46,26 +126,25 @@ def fetch_json_from_url(url: str):
         return None
 
 def safe_button_key(prefix: str, row: dict) -> str:
-    """Create a deterministic short key for interactive Widgets"""
-    rid = row.get("id") or row.get("topic") or ""
-    created = str(row.get("created_at") or "")
+    """Create a deterministic short key for interactive Widgets (shortened)."""
+    rid = str(row.get("id") or row.get("topic") or "")[:24].replace(" ", "_")
+    created = str(row.get("created_at") or "")[:24].replace(" ", "_")
     return f"{prefix}_{rid}_{created}"
 
-def infer_notes_url_from_pdf(pdf_url: str) -> str | None:
+def infer_notes_url_from_pdf(pdf_url: Optional[str]) -> Optional[str]:
     """Try common path substitutions to guess notes JSON URL."""
     if not pdf_url:
         return None
     try:
         if "/pdfs/" in pdf_url:
             return pdf_url.replace("/pdfs/", "/notes/").rsplit(".pdf", 1)[0] + ".json"
-        # fallback: replace .pdf with .json
         if pdf_url.lower().endswith(".pdf"):
             return pdf_url[:-4] + ".json"
     except Exception:
         return None
     return None
 
-def infer_segments_url_from_pdf(pdf_url: str) -> str | None:
+def infer_segments_url_from_pdf(pdf_url: Optional[str]) -> Optional[str]:
     if not pdf_url:
         return None
     try:
@@ -85,19 +164,33 @@ selected_class = st.sidebar.selectbox("Class", options=["All"] + classes, index=
 subject_input = st.sidebar.text_input("Subject (optional)")
 q = st.sidebar.text_input("Search topics or chapters")
 
+# dev debug toggle
+dev_mode = st.sidebar.checkbox("Dev: show debug", value=True)
+
 # ---------- Fetch topics ----------
 topics = list_topics()
 
+# Debug info in sidebar
+if dev_mode:
+    st.sidebar.markdown("### Debug: fetched topics")
+    st.sidebar.write(f"count: {len(topics)}")
+    if topics:
+        st.sidebar.write(topics[:2])
+
 # ---------- Simple Pagination Setup ----------
 PAGE_SIZE = 8
-# use query params for persistence across reloads
-# prefer new API st.query_params / st.set_query_params; fallback to experimental if missing
+# use modern API
 try:
     qp = st.query_params or {}
 except Exception:
     qp = {}
 
-page = int(qp.get("page", [1])[0]) if isinstance(qp.get("page"), list) else int(qp.get("page", 1))
+# normalize page value
+raw_page = qp.get("page", ["1"])[0] if isinstance(qp.get("page"), list) else qp.get("page", 1)
+try:
+    page = int(raw_page)
+except Exception:
+    page = 1
 if page < 1:
     page = 1
 
@@ -125,12 +218,12 @@ st.sidebar.markdown(f"**{len(filtered)}** topics found")
 total_pages = max(1, (len(filtered) + PAGE_SIZE - 1) // PAGE_SIZE)
 cols = st.columns([1,2,1])
 with cols[0]:
-    if st.button("← Prev") and page > 1:
+    if st.button("← Prev", key="nav_prev") and page > 1:
         page -= 1
         st.set_query_params(page=page)
         st.experimental_rerun()
 with cols[2]:
-    if st.button("Next →") and page < total_pages:
+    if st.button("Next →", key="nav_next") and page < total_pages:
         page += 1
         st.set_query_params(page=page)
         st.experimental_rerun()
@@ -144,8 +237,6 @@ page_items = filtered[start:end]
 # ---------- Main ----------
 st.title("📚 CBSE NotesHub — Student Portal")
 st.markdown("Browse uploaded topics, read notes, view PDFs and listen to audio explanations.")
-
-# show a helpful warning if Streamlit query param old API present (to mirror your screenshot)
 st.caption("Tip: If you see a deprecation message about `query_params`, this app uses current APIs.")
 
 # topic list (cards)
@@ -189,14 +280,17 @@ if page_items:
             st.caption(f"{created}")
             # optional thumbnail if stored
             if row.get("thumbnail_url"):
-                st.image(row.get("thumbnail_url"), width=120)
+                try:
+                    st.image(row.get("thumbnail_url"), width=120)
+                except Exception:
+                    pass
 
 # ---------- Topic Detail (from session or query param) ----------
 selected = None
 if st.session_state.get("_selected"):
     selected = st.session_state._selected
 else:
-    # query params may include topic (name) or notes URL; use current API if possible
+    # query params may include topic (name) or notes URL; use current API
     params = st.query_params or {}
     if params.get("topic"):
         tname = params.get("topic")[0] if isinstance(params.get("topic"), list) else params.get("topic")
