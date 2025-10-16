@@ -1,0 +1,4 @@
+Input: notes JSON as described above.
+Output: A JSON array of narration segments. For each theory section and each quick_revision item produce: { "segment_id": "<audio_segment_id>", "text": "<spoken script>", "approx_duration_seconds": N }.
+
+Rules: Use short sentences. Insert "[pause 0.4s]" to indicate pauses. Keep 80-120 words per ~60 seconds. Recommend voice style: Indian English, calm and clear. Return only JSON.

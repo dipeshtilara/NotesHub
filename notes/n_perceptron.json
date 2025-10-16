@@ -1,0 +1,38 @@
+{
+  "id": "n_perceptron",
+  "class": "XI",
+  "subject": "Artificial Intelligence",
+  "chapter": "Introduction to Machine Learning",
+  "topic": "Perceptron",
+  "title": "Perceptron — Intuition and Example",
+  "learning_objectives": [
+    "Samjhe ki perceptron kya hota hai aur kaise binary classification karta hai",
+    "Mathematical formulation of perceptron rule",
+    "Simple Python example for perceptron learning"
+  ],
+  "theory": [
+    {
+      "section_title": "What is a Perceptron?",
+      "audio_segment_id": "perceptron_sec1",
+      "text": "Perceptron ek simple linear classifier hai jo input features ka weighted sum leta hai aur threshold ke basis par class predict karta hai. Yeh binary classification ka basic model hai..."
+    },
+    {
+      "section_title": "Perceptron Learning Rule (Short)",
+      "audio_segment_id": "perceptron_sec2",
+      "text": "Weights ko update karne ka rule: w := w + learning_rate * (y_true - y_pred) * x. Example ke liye consider karte hain sample training points..."
+    }
+  ],
+  "examples": [
+    {
+      "type": "code",
+      "language": "python",
+      "content": "from sklearn.linear_model import Perceptron\nX = [[0,0],[0,1],[1,0],[1,1]]\ny = [0,0,0,1]\nclf = Perceptron().fit(X,y)\nprint(clf.predict([[1,1]]))"
+    }
+  ],
+  "quick_revision": ["Perceptron = linear classifier", "Update rule: w += lr*(y - y_hat)*x"],
+  "5_mcq": [
+    {"q": "Perceptron is used for?", "options": ["Regression","Binary classification","Clustering","Dimension reduction"], "ans": 1}
+  ],
+  "generated_by": "sample",
+  "created_at": "2025-10-12T00:00:00Z"
+}
