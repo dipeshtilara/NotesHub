@@ -130,19 +130,14 @@ cols = st.columns([1,2,1])
 with cols[0]:
     if st.button("← Prev") and page > 1:
         page -= 1
-        try:
-            st.set_query_params(page=page)
-        except Exception:
-            st.set_query_params(page=page)
-        st.experimental_rerun()
+        st.set_query_params(page=page)
+        
+        st.rerun()
 with cols[2]:
     if st.button("Next →") and page < total_pages:
         page += 1
-        try:
-            st.set_query_params(page=page)
-        except Exception:
-            st.set_query_params(page=page)
-        st.experimental_rerun()
+        st.set_query_params(page=page)
+        st.rerun()
 with cols[1]:
     st.write(f"Page {page} / {total_pages}")
 
@@ -155,7 +150,7 @@ st.title("📚 CBSE NotesHub — Student Portal")
 st.markdown("Browse uploaded topics, read notes, view PDFs and listen to audio explanations.")
 
 # show a helpful warning if Streamlit query param old API present (to mirror your screenshot)
-st.caption("Tip: If you see a deprecation message about `experimental_get_query_params`, this app uses current APIs.")
+st.caption("Tip: If you see a deprecation message about `query_params`, this app uses current APIs.")
 
 # topic list (cards)
 if page_items:
@@ -180,22 +175,16 @@ if page_items:
             if btns[1].button("Open PDF", key=safe_button_key("openpdf", row)):
                 if pdf_url:
                     # set query param topic and page so user can share link
-                    try:
-                        st.set_query_params(topic=row.get("topic"), page=page)
-                    except Exception:
-                        st.set_query_params(topic=row.get("topic"), page=page)
-                    st.experimental_rerun()
+                    st.set_query_params(topic=row.get("topic"), page=page)
+                    st.rerun()
                 else:
                     st.warning("PDF not available for this topic.")
             if btns[2].button("JSON", key=safe_button_key("json", row)):
                 # try to open notes JSON
                 notes_url = row.get("notes_url") or infer_notes_url_from_pdf(pdf_url)
                 if notes_url:
-                    try:
-                        st.set_query_params(notes=notes_url, page=page)
-                    except Exception:
-                        st.set_query_params(notes=notes_url, page=page)
-                    st.experimental_rerun()
+                    st.set_query_params(notes=notes_url, page=page)
+                    st.rerun()
                 else:
                     st.warning("Notes JSON not found or not public.")
         with c2:
@@ -212,11 +201,7 @@ if st.session_state.get("_selected"):
     selected = st.session_state._selected
 else:
     # query params may include topic (name) or notes URL; use current API if possible
-    try:
-        params = st.query_params or {}
-    except Exception:
-        params = st.query_params() or {}
-
+    params = st.query_params or {}
     if params.get("topic"):
         tname = params.get("topic")[0] if isinstance(params.get("topic"), list) else params.get("topic")
         for r in topics:
@@ -306,11 +291,8 @@ if selected:
         if st.session_state.get('_selected'):
             del st.session_state['_selected']
         # reset query params (preserve page)
-        try:
-            st.set_query_params(page=page)
-        except Exception:
-            st.set_query_params(page=page)
-        st.experimental_rerun()
+        st.set_query_params(page=page)
+        st.rerun()
 
 # ---------- Footer ----------
 st.markdown("---")
