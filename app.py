@@ -216,6 +216,25 @@ if submit:
     segs_url = upload_bytes_to_supabase("cbse-resources", segs_path, segs_bytes, content_type="application/json")
     if segs_url:
         st.success(f"📑 **Audio Segments Metadata Stored!** [View JSON]({segs_url})")
+    # --- Insert metadata into topics table so frontend can read it ---
+    try:
+        to_insert = {
+            "class": class_name,
+            "subject": subject,
+            "chapter": chapter,
+            "topic": topic,
+            "summary": notes_json.get("title") or notes_json.get("topic") or "",
+            "pdf_url": pdf_url,              # public URL returned by upload_bytes_to_supabase
+            "notes_url": notes_url or None,  # JSON URL if available
+            "segments_url": segs_url or None,
+            "thumbnail_url": None,
+        } # Use admin client if available to avoid permission problems
+        db_client = supabase_admin if supabase_admin else supabase
+        resp = db_client.table("topics").insert(to_insert).execute()
+        st.success("🔁 Metadata saved to topics table.")
+    except Exception as e:
+        st.warning(f"Could not write metadata to topics table: {e}")
+        st.sidebar.error(traceback.format_exc())
 
     st.balloons()
     st.success("✅ Resource Created! Students can access all content via shared URLs.")
