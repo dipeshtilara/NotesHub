@@ -172,7 +172,7 @@ if page_items:
                 if pdf_url:
                     # set query param topic and page so user can share link
                     st.set_query_params(topic=row.get("topic"), page=page)
-                    st.rerun()
+                    st.experimental_rerun()
                 else:
                     st.warning("PDF not available for this topic.")
             if btns[2].button("JSON", key=safe_button_key("json", row)):
@@ -180,7 +180,7 @@ if page_items:
                 notes_url = row.get("notes_url") or infer_notes_url_from_pdf(pdf_url)
                 if notes_url:
                     st.set_query_params(notes=notes_url, page=page)
-                    st.rerun()
+                    st.experimental_rerun()
                 else:
                     st.warning("Notes JSON not found or not public.")
         with c2:
